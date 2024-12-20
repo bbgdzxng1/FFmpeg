@@ -98,7 +98,9 @@ static av_cold int init(AVFilterContext *ctx)
     RaisrContext *raisr = ctx->priv;
 
     char cwd[255];
-    char basepath[255];  // Moved declaration to the beginning
+    char basepath[255];
+    RangeType rangeType = VideoRange;
+    ASMType asm_t;
 
     if (getcwd(cwd, 255) == NULL)
         return AVERROR(ENOENT);
@@ -113,11 +115,9 @@ static av_cold int init(AVFilterContext *ctx)
         strcpy(basepath, raisr->filterfolder);
     }
 
-    RangeType rangeType = VideoRange;
     if (strcmp(raisr->range, "full") == 0)
         rangeType = FullRange;
 
-    ASMType asm_t;
     if (strcmp(raisr->asmStr, "avx2") == 0)
         asm_t = AVX2;
     else if (strcmp(raisr->asmStr, "avx512") == 0)
