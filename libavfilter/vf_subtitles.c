@@ -453,6 +453,9 @@ static av_cold int init_subtitles(AVFilterContext *ctx)
     if (ass->charenc)
         av_dict_set(&codec_opts, "sub_charenc", ass->charenc, 0);
 
+    // Always pass data_field = -1 (auto) to ccaption_dec for SCC files, since SCC files should only be either EIA-608 field 1 or field 2.
+    av_dict_set(&codec_opts, "data_field", "-1", 0);
+    
     dec_ctx = avcodec_alloc_context3(dec);
     if (!dec_ctx) {
         ret = AVERROR(ENOMEM);
