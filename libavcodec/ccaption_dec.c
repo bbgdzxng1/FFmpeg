@@ -772,15 +772,15 @@ static int process_cc608(CCaptionSubContext *ctx, uint8_t hi, uint8_t lo)
     if ( (hi >= 0x10 && hi <= 0x1f) && (lo >= 0x40 && lo <= 0x7f) ) {
         /* EIA-608 Preamble Access Codes */
         handle_pac(ctx, hi, lo);
-    } else if (((hi == 0x11 || hi == 0x19) && (lo >= 0x20 && lo <= 0x2f)) ||
-               ((hi == 0x17 || hi == 0x1f) && (lo >= 0x2e && lo <= 0x2f))) {
+    } else if ( ((hi == 0x11 || hi == 0x19) && (lo >= 0x20 && lo <= 0x2f)) ||
+               ((hi == 0x17 || hi == 0x1f) && (lo >= 0x2e && lo <= 0x2f)) ) {
         /* EIA-608 Mid Row Codes */
         handle_textattr(ctx, hi, lo);
     } else if ((hi == 0x10 || hi == 0x18) && lo >= 0x20 && lo <= 0x2f) {
         /* EIA-608 Background Attribute Codes */
         handle_bgattr(ctx, hi, lo);
     } else if (hi == 0x14 || hi == 0x15 || hi == 0x1c || hi == 0x1d) {
-        /* EIA-608 Misc Control Codes */
+        /* EIA-608 Miscellaneous Control Codes */
         switch (lo) {
         case 0x20:
             /* Resume Caption Loading {RCL} */
@@ -844,23 +844,28 @@ static int process_cc608(CCaptionSubContext *ctx, uint8_t hi, uint8_t lo)
             ff_dlog(ctx->logctx, "Unknown command 0x%hhx 0x%hhx\n", hi, lo);
             break;
         }
-    } else if ((((hi >= 0x11 && hi <= 0x13) || (hi >= 0x19 && hi <= 0x1b))) &&
-               (lo >= 0x30 && lo <= 0x3f)) {
-        /* EIA-608 special characters */
-        handle_char(ctx, hi, lo);
-    } else if (hi >= 0x20) {
-        /* EIA-608 standard characters (always in pairs) */
-        handle_char(ctx, hi, lo);
-        ctx->prev_cmd[0] = ctx->prev_cmd[1] = 0;
-    } else if ((hi == 0x17 || hi == 0x1f) && (lo >= 0x21 && lo <= 0x23)) {
-        /* EIA-608 misc code tab offsets (spacing) */
+    } else if ((hi == 0x17 || hi == 0x1f) && (lo >= 0x21 && lo <= 0x23) ) {
+        /* EIA-608 Miscellaneous Control Coded (tab offsets) */
         int i;
         /* Tab offsets (spacing) */
         for (i = 0; i < lo - 0x20; i++) {
             handle_char(ctx, ' ', 0);
         }
+    } else if ((hi == 0x11 || hi == 0x19) && (lo >= 0x30 && lo <= 0x3f) ) {
+        /* EIA-608 Special Characters */
+        handle_char(ctx, hi, lo);
+    } else if ((hi == 0x12 || hi == 0x13 || hi == 0x1a || hi == 0x1b) &&
+               (lo >= 0x20 && lo <= 0x3f)) {
+        /* EIA-608 Extended Characters */
+        handle_char(ctx, hi, lo);
+    } else if (hi >= 0x20) {
+        /* EIA-608 Standard Characters */
+        // Always in 2-byte pairs //
+        handle_char(ctx, hi, lo);
+        ctx->prev_cmd[0] = ctx->prev_cmd[1] = 0;
     } else {
-        /* Ignoring all other non-data code */
+        /* Ignore all other codes */
+        // XDS will be ignored.
         // Known missing EIA-608 caption control codes include:
         // - Background Transparent {BT}, Foreground Black {FA} & Foreground Black Underline {FAU} ((hi == 0x17 || hi == 1f) && (lo >= 0x2d && lo <= 0x2f)
         // - The EIA-608 Special Assignments
