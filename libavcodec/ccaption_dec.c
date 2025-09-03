@@ -144,8 +144,8 @@ enum cc_charset {
         ENTRY(0x26, "\u00f2")                            \
         ENTRY(0x27, "\u00d5")                            \
         ENTRY(0x28, "\u00f5")                            \
-        ENTRY(0x29, "{")                                 \
-        ENTRY(0x2a, "}")                                 \
+        ENTRY(0x29, "\\{")  /* pass encoded to libass */ \
+        ENTRY(0x2a, "\\}")  /* pass encoded to libass */ \
         ENTRY(0x2b, "\\")                                \
         ENTRY(0x2c, "^")                                 \
         ENTRY(0x2d, "_")                                 \
