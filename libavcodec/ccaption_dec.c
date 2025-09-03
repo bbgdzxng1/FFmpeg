@@ -769,19 +769,31 @@ static int process_cc608(CCaptionSubContext *ctx, uint8_t hi, uint8_t lo)
     ctx->prev_cmd[0] = hi;
     ctx->prev_cmd[1] = lo;
 
-    if ( (hi == 0x10 && (lo >= 0x40 && lo <= 0x5f)) ||
-       ( (hi >= 0x11 && hi <= 0x17) && (lo >= 0x40 && lo <= 0x7f) ) ) {
+    if ( (hi >= 0x10 && hi <= 0x1f) && (lo >= 0x40 && lo <= 0x7f) ) {
+        /* EIA-608 Preamble Access Codes */
         handle_pac(ctx, hi, lo);
-    } else if ( ( hi == 0x11 && lo >= 0x20 && lo <= 0x2f ) ||
-                ( hi == 0x17 && lo >= 0x2e && lo <= 0x2f) ) {
+    } else if (((hi == 0x11 || hi == 0x19) && (lo >= 0x20 && lo <= 0x2f)) ||
+               ((hi == 0x17 || hi == 0x1f) && (lo >= 0x2e && lo <= 0x2f))) {
+        /* EIA-608 Mid Row Codes */
         handle_textattr(ctx, hi, lo);
-    } else if ((hi == 0x10 && lo >= 0x20 && lo <= 0x2f)) {
+    } else if ((hi == 0x10 || hi == 0x18) && lo >= 0x20 && lo <= 0x2f) {
+        /* EIA-608 Background Attribute Codes */
         handle_bgattr(ctx, hi, lo);
-    } else if (hi == 0x14 || hi == 0x15 || hi == 0x1c) {
+    } else if (hi == 0x14 || hi == 0x15 || hi == 0x1c || hi == 0x1d) {
+        /* EIA-608 Misc Control Codes */
         switch (lo) {
         case 0x20:
-            /* resume caption loading */
+            /* Resume Caption Loading {RCL} */
             ctx->mode = CCMODE_POPON;
+            break;
+        case 0x21:
+            /* No-op. Backspace {BS} not implemented */
+            break;
+        case 0x22:
+            /*  No-op. Reserved (formerly Alarm Off {AOF}) */
+            break;
+        case 0x23:
+            /*  No-op. Reserved (formerly Alarm On  {AON}) */
             break;
         case 0x24:
             handle_delete_end_of_row(ctx);
@@ -789,23 +801,24 @@ static int process_cc608(CCaptionSubContext *ctx, uint8_t hi, uint8_t lo)
         case 0x25:
         case 0x26:
         case 0x27:
+            /* Roll-Up {RU2,3,4} */
             ctx->rollup = lo - 0x23;
             ctx->mode = CCMODE_ROLLUP;
             break;
         case 0x29:
-            /* resume direct captioning */
+            /* Resume Direct Captioning {RDC} */
             ctx->mode = CCMODE_PAINTON;
             break;
         case 0x2b:
-            /* resume text display */
+            /* Resume Text Display {RTD} */
             ctx->mode = CCMODE_TEXT;
             break;
         case 0x2c:
-            /* erase display memory */
+            /* Erase Display Memory {EDM} */
             handle_edm(ctx);
             break;
         case 0x2d:
-            /* carriage return */
+            /* Carriage Return {CR} */
             ff_dlog(ctx->logctx, "carriage return\n");
             if (!ctx->real_time)
                 ret = capture_screen(ctx);
@@ -813,7 +826,7 @@ static int process_cc608(CCaptionSubContext *ctx, uint8_t hi, uint8_t lo)
             ctx->cursor_column = 0;
             break;
         case 0x2e:
-            /* erase buffered (non displayed) memory */
+            /* Erase Non-displayed Memory {ENM} */
             // Only in realtime mode. In buffered mode, we reuse the inactive screen
             // for our own buffering.
             if (ctx->real_time) {
@@ -822,7 +835,8 @@ static int process_cc608(CCaptionSubContext *ctx, uint8_t hi, uint8_t lo)
             }
             break;
         case 0x2f:
-            /* end of caption */
+            /* End Of Caption {EOC} (Flip Memories) */
+            // This swaps the non-displayed memory to the displayed memory
             ff_dlog(ctx->logctx, "handle_eoc\n");
             ret = handle_eoc(ctx);
             break;
@@ -830,21 +844,26 @@ static int process_cc608(CCaptionSubContext *ctx, uint8_t hi, uint8_t lo)
             ff_dlog(ctx->logctx, "Unknown command 0x%hhx 0x%hhx\n", hi, lo);
             break;
         }
-    } else if (hi >= 0x11 && hi <= 0x13) {
-        /* Special characters */
+    } else if ((((hi >= 0x11 && hi <= 0x13) || (hi >= 0x19 && hi <= 0x1b))) &&
+               (lo >= 0x30 && lo <= 0x3f)) {
+        /* EIA-608 special characters */
         handle_char(ctx, hi, lo);
     } else if (hi >= 0x20) {
-        /* Standard characters (always in pairs) */
+        /* EIA-608 standard characters (always in pairs) */
         handle_char(ctx, hi, lo);
         ctx->prev_cmd[0] = ctx->prev_cmd[1] = 0;
-    } else if (hi == 0x17 && lo >= 0x21 && lo <= 0x23) {
+    } else if ((hi == 0x17 || hi == 0x1f) && (lo >= 0x21 && lo <= 0x23)) {
+        /* EIA-608 misc code tab offsets (spacing) */
         int i;
         /* Tab offsets (spacing) */
         for (i = 0; i < lo - 0x20; i++) {
             handle_char(ctx, ' ', 0);
         }
     } else {
-        /* Ignoring all other non data code */
+        /* Ignoring all other non-data code */
+        // Known missing EIA-608 caption control codes include:
+        // - Background Transparent {BT}, Foreground Black {FA} & Foreground Black Underline {FAU} ((hi == 0x17 || hi == 1f) && (lo >= 0x2d && lo <= 0x2f)
+        // - The EIA-608 Special Assignments
         ff_dlog(ctx->logctx, "Unknown command 0x%hhx 0x%hhx\n", hi, lo);
     }
 
