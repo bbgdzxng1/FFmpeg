@@ -460,9 +460,7 @@ static void roll_up(CCaptionSubContext *ctx)
 
 static int capture_screen(CCaptionSubContext *ctx)
 {
-    // Disable skipping of leading space
-    // int i, j, tab = 0;
-    int i, j = 0;
+    int i, j, tab = 0;
     struct Screen *screen = ctx->screen + ctx->active_screen;
     enum cc_font prev_font = CCFONT_REGULAR;
     enum cc_color_code prev_color = CCCOL_WHITE;
@@ -471,19 +469,18 @@ static int capture_screen(CCaptionSubContext *ctx)
 
     av_bprint_clear(&ctx->buffer[bidx]);
 
-    // Disable skipping of leading space
-    // for (i = 0; screen->row_used && i < SCREEN_ROWS; i++)
-    // {
-    //     if (CHECK_FLAG(screen->row_used, i)) {
-    //         const char *row = screen->characters[i];
-    //         const char *charset = screen->charsets[i];
-    //         j = 0;
-    //         while (row[j] == ' ' && charset[j] == CCSET_BASIC_AMERICAN)
-    //             j++;
-    //         if (!tab || j < tab)
-    //             tab = j;
-    //     }
-    // }
+    for (i = 0; screen->row_used && i < SCREEN_ROWS; i++)
+    {
+        if (CHECK_FLAG(screen->row_used, i)) {
+            const char *row = screen->characters[i];
+            const char *charset = screen->charsets[i];
+            j = 0;
+            while (row[j] == ' ' && charset[j] == CCSET_BASIC_AMERICAN)
+                j++;
+            if (!tab || j < tab)
+                tab = j;
+        }
+    }
 
     for (i = 0; screen->row_used && i < SCREEN_ROWS; i++)
     {
@@ -497,10 +494,9 @@ static int capture_screen(CCaptionSubContext *ctx)
             int x, y, seen_char = 0;
             j = 0;
             
-            // Disable skipping of leading space
-            // /* skip leading space */
-            // while (row[j] == ' ' && charset[j] == CCSET_BASIC_AMERICAN && j < tab)
-            //     j++;
+            /* skip leading space */
+            while (row[j] == ' ' && charset[j] == CCSET_BASIC_AMERICAN && j < tab)
+                j++;
 
             x = ASS_DEFAULT_PLAYRESX * (0.1 + 0.0250 * j);
             y = ASS_DEFAULT_PLAYRESY * (0.1 + 0.0533 * i);
