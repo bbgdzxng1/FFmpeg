@@ -770,15 +770,21 @@ static int process_cc608(CCaptionSubContext *ctx, uint8_t hi, uint8_t lo)
     ctx->prev_cmd[0] = hi;
     ctx->prev_cmd[1] = lo;
 
-    if ( (hi == 0x10 && (lo >= 0x40 && lo <= 0x5f)) ||
-       ( (hi >= 0x11 && hi <= 0x17) && (lo >= 0x40 && lo <= 0x7f) ) ) {
+    if ( (hi >= 0x10 && hi <= 0x1f) &&
+         (((hi == 0x10 || hi == 0x18) && (lo >= 0x40 && lo <= 0x5f)) ||
+          ((hi != 0x10 && hi != 0x18) && (lo >= 0x40 && lo <= 0x7f)) ) ) {
+        /* Preamble Address Codes (PAC), with 0x10/0x18 limited to 0x40–0x5f */
         handle_pac(ctx, hi, lo);
-    } else if ( ( hi == 0x11 && lo >= 0x20 && lo <= 0x2f ) ||
-                ( hi == 0x17 && lo >= 0x2e && lo <= 0x2f) ) {
+    } else if ( ((hi == 0x11 || hi == 0x19) && lo >= 0x20 && lo <= 0x2f) ||
+                ((hi == 0x17 || hi == 0x1f) && lo >= 0x2e && lo <= 0x2f) ) {
+        /* Mid-Row Codes (MRC) */
         handle_textattr(ctx, hi, lo);
-    } else if ((hi == 0x10 && lo >= 0x20 && lo <= 0x2f)) {
+    } else if ( (hi == 0x10 || hi == 0x18) && lo >= 0x20 && lo <= 0x2f ) {
+        /* Background Attribute Codes (BAC) */
         handle_bgattr(ctx, hi, lo);
-    } else if (hi == 0x14 || hi == 0x15 || hi == 0x1c) {
+    } else if ( (hi == 0x14 || hi == 0x15 || hi == 0x1c || hi == 0x1d) &&
+                 lo >= 0x20 && lo <= 0x2f ) {
+        /* Miscellaneous Control Codes (MCC) */
         switch (lo) {
         case 0x20:
             /* resume caption loading */
@@ -831,14 +837,18 @@ static int process_cc608(CCaptionSubContext *ctx, uint8_t hi, uint8_t lo)
             ff_dlog(ctx->logctx, "Unknown command 0x%hhx 0x%hhx\n", hi, lo);
             break;
         }
-    } else if (hi >= 0x11 && hi <= 0x13) {
+    } else if ( (hi == 0x12 || hi == 0x13 || hi == 0x1a || hi == 0x1b) &&
+                 lo >= 0x20 && lo <= 0x3f ) {
+        /* Extended characters */
+        handle_char(ctx, hi, lo);
+    } else if ( (hi == 0x11 || hi == 0x19) && lo >= 0x30 && lo <= 0x3f ) {
         /* Special characters */
         handle_char(ctx, hi, lo);
     } else if (hi >= 0x20) {
         /* Standard characters (always in pairs) */
         handle_char(ctx, hi, lo);
         ctx->prev_cmd[0] = ctx->prev_cmd[1] = 0;
-    } else if (hi == 0x17 && lo >= 0x21 && lo <= 0x23) {
+    } else if ( (hi == 0x17 || hi == 0x1f) && lo >= 0x21 && lo <= 0x23 ) {
         int i;
         /* Tab offsets (spacing) */
         for (i = 0; i < lo - 0x20; i++) {
