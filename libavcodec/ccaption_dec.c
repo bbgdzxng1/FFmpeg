@@ -111,7 +111,7 @@ enum cc_charset {
         ENTRY(0x26, "\u2018")                            \
         ENTRY(0x27, "\u00a1")                            \
         ENTRY(0x28, "*")                                 \
-        ENTRY(0x29, "'")                            \
+        ENTRY(0x29, "'")                                 \
         ENTRY(0x2a, "-")                                 \
         ENTRY(0x2b, "\u00a9")                            \
         ENTRY(0x2c, "\u2120")                            \
