@@ -290,7 +290,7 @@ static av_cold int init_decoder(AVCodecContext *avctx)
     ctx->mode = CCMODE_ROLLUP;
     ctx->bg_color = CCCOL_BLACK;
     ctx->rollup = 2;
-    ctx->cursor_row = 10;
+    ctx->cursor_row = 14;
     return ff_ass_subtitle_header(avctx, "Monospace",
                                  ASS_DEFAULT_FONT_SIZE,
                                  ASS_DEFAULT_COLOR,
@@ -319,7 +319,7 @@ static av_cold void flush_decoder(AVCodecContext *avctx)
     ctx->prev_cmd[1] = 0;
     ctx->mode = CCMODE_ROLLUP;
     ctx->rollup = 2;
-    ctx->cursor_row = 10;
+    ctx->cursor_row = 14;
     ctx->cursor_column = 0;
     ctx->cursor_font = 0;
     ctx->cursor_color = 0;
