@@ -318,7 +318,7 @@ static int FUNC(payload_extension) (CodedBitstreamContext *ctx, RWContext *rw,
     GetBitContext tmp;
     int bits_left, payload_zero_bits;
 
-    if (!cbs_h265_payload_extension_present(rw, payload_size, cur_pos))
+    if (!ff_cbs_h2645_payload_extension_present(rw, payload_size, cur_pos))
         return 0;
 
     bits_left = 8 * payload_size - cur_pos;
@@ -373,7 +373,7 @@ static int FUNC(extension_data) (CodedBitstreamContext *ctx, RWContext *rw,
     GetBitContext start;
     uint8_t bit;
     start = *rw;
-    for (k = 0; cbs_h2645_read_more_rbsp_data(rw); k++)
+    for (k = 0; ff_cbs_h2645_read_more_rbsp_data(rw); k++)
         skip_bits(rw, 1);
     current->bit_length = k;
     if (k > 0) {
@@ -1973,14 +1973,14 @@ static int FUNC(pps) (CodedBitstreamContext *ctx, RWContext *rw,
                 tile_y = tile_idx / current->num_tile_columns;
                 if (tile_x != current->num_tile_columns - 1) {
                     ues(pps_slice_width_in_tiles_minus1[i],
-                        0, current->num_tile_columns - 1, 1, i);
+                        0, current->num_tile_columns - 1 - tile_x, 1, i);
                 } else {
                     infer(pps_slice_width_in_tiles_minus1[i], 0);
                 }
                 if (tile_y != current->num_tile_rows - 1 &&
                     (current->pps_tile_idx_delta_present_flag || tile_x == 0)) {
                     ues(pps_slice_height_in_tiles_minus1[i],
-                        0, current->num_tile_rows - 1, 1, i);
+                        0, current->num_tile_rows - 1 - tile_y, 1, i);
                 } else {
                     if (tile_y == current->num_tile_rows - 1)
                         infer(pps_slice_height_in_tiles_minus1[i], 0);
@@ -2011,6 +2011,12 @@ static int FUNC(pps) (CodedBitstreamContext *ctx, RWContext *rw,
                         slice_top_left_ctu_y[i] = ctu_y;
                     } else {
                         uint16_t slice_height_in_ctus;
+                        int num_uniform_slices;
+
+                        if (i + current->pps_num_exp_slices_in_tile[i] >
+                            current->pps_num_slices_in_pic_minus1 + 1)
+                            return AVERROR_INVALIDDATA;
+
                         for (j = 0; j < current->pps_num_exp_slices_in_tile[i];
                              j++) {
                             ues(pps_exp_slice_height_in_ctus_minus1[i][j], 0,
@@ -2031,6 +2037,13 @@ static int FUNC(pps) (CodedBitstreamContext *ctx, RWContext *rw,
                         uniform_slice_height = 1 +
                             (j == 0 ? current->row_height_val[tile_y] - 1:
                             current->pps_exp_slice_height_in_ctus_minus1[i][j-1]);
+
+                        num_uniform_slices = (remaining_height_in_ctbs_y + uniform_slice_height - 1)
+                                           / uniform_slice_height;
+                        if (i + current->pps_num_exp_slices_in_tile[i] + num_uniform_slices >
+                            current->pps_num_slices_in_pic_minus1 + 1)
+                            return AVERROR_INVALIDDATA;
+
                         while (remaining_height_in_ctbs_y > uniform_slice_height) {
                             current->slice_height_in_ctus[i + j] =
                                                           uniform_slice_height;
@@ -3247,6 +3260,12 @@ static int FUNC(slice_header) (CodedBitstreamContext *ctx, RWContext *rw,
                 current->num_ref_idx_active[i] =
                     FFMIN(ref_pic_lists->rpl_ref_list[i].num_ref_entries,
                         pps->pps_num_ref_idx_default_active_minus1[i] + 1);
+            }
+
+            if (current->num_ref_idx_active[i] <= 0) {
+                av_log(ctx->log_ctx, AV_LOG_ERROR,
+                       "Inter slice but no reference pictures available for RPL%d.\n", i);
+                return AVERROR_INVALIDDATA;
             }
         } else {
             current->num_ref_idx_active[i] = 0;

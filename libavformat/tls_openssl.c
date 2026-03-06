@@ -20,7 +20,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "libavutil/avassert.h"
 #include "libavutil/mem.h"
 #include "network.h"
 #include "os_support.h"
@@ -101,7 +100,7 @@ static int x509_fingerprint(X509 *cert, char **fingerprint)
     if (X509_digest(cert, EVP_sha256(), md, &n) != 1) {
         av_log(NULL, AV_LOG_ERROR, "TLS: Failed to generate fingerprint, %s\n",
                ERR_error_string(ERR_get_error(), NULL));
-        return AVERROR(ENOMEM);
+        return AVERROR(EINVAL);
     }
 
     av_bprint_init(&buf, n*3, n*3);
@@ -268,7 +267,6 @@ static int openssl_gen_certificate(EVP_PKEY *pkey, X509 **cert, char **fingerpri
         goto enomem_end;
     }
 
-    // TODO: Support non-self-signed certificate, for example, load from a file.
     subject = X509_NAME_new();
     if (!subject) {
         goto enomem_end;
@@ -314,7 +312,7 @@ static int openssl_gen_certificate(EVP_PKEY *pkey, X509 **cert, char **fingerpri
         goto einval_end;
     }
 
-    if (!X509_sign(*cert, pkey, EVP_sha1())) {
+    if (!X509_sign(*cert, pkey, EVP_sha256())) {
         av_log(NULL, AV_LOG_ERROR, "TLS: Failed to sign certificate, %s\n", ERR_error_string(ERR_get_error(), NULL));
         goto einval_end;
     }
@@ -400,17 +398,16 @@ static EVP_PKEY *pkey_from_pem_string(const char *pem_str, int is_priv)
  */
 static X509 *cert_from_pem_string(const char *pem_str)
 {
+    X509 *cert = NULL;
     BIO *mem = BIO_new_mem_buf(pem_str, -1);
     if (!mem) {
         av_log(NULL, AV_LOG_ERROR, "BIO_new_mem_buf failed\n");
         return NULL;
     }
 
-    X509 *cert = PEM_read_bio_X509(mem, NULL, NULL, NULL);
-    if (!cert) {
+    cert = PEM_read_bio_X509(mem, NULL, NULL, NULL);
+    if (!cert)
         av_log(NULL, AV_LOG_ERROR, "Failed to parse certificate from string\n");
-        return NULL;
-    }
 
     BIO_free(mem);
     return cert;
@@ -418,7 +415,6 @@ static X509 *cert_from_pem_string(const char *pem_str)
 
 
 typedef struct TLSContext {
-    const AVClass *class;
     TLSShared tls_shared;
     SSL_CTX *ctx;
     SSL *ssl;
@@ -747,8 +743,14 @@ static int dtls_start(URLContext *h, const char *url, int flags, AVDictionary **
     TLSContext *c = h->priv_data;
     TLSShared *s = &c->tls_shared;
     int ret = 0;
-    av_assert0(s);
     s->is_dtls = 1;
+
+    if (!c->tls_shared.external_sock) {
+        if ((ret = ff_tls_open_underlying(&c->tls_shared, h, url, options)) < 0) {
+            av_log(c, AV_LOG_ERROR, "Failed to connect %s\n", url);
+            return ret;
+        }
+    }
 
     c->ctx = SSL_CTX_new(s->listen ? DTLS_server_method() : DTLS_client_method());
     if (!c->ctx) {
@@ -802,30 +804,13 @@ static int dtls_start(URLContext *h, const char *url, int flags, AVDictionary **
     DTLS_set_link_mtu(c->ssl, s->mtu);
     init_bio_method(h);
 
-    if (!c->tls_shared.external_sock) {
-        if ((ret = ff_tls_open_underlying(&c->tls_shared, h, url, options)) < 0) {
-            av_log(c, AV_LOG_ERROR, "Failed to connect %s\n", url);
-            return ret;
-        }
-    }
-
     /* This seems to be necessary despite explicitly setting client/server method above. */
     if (s->listen)
         SSL_set_accept_state(c->ssl);
     else
         SSL_set_connect_state(c->ssl);
 
-    /**
-     * During initialization, we only need to call SSL_do_handshake once because SSL_read consumes
-     * the handshake message if the handshake is incomplete.
-     * To simplify maintenance, we initiate the handshake for both the DTLS server and client after
-     * sending out the ICE response in the start_active_handshake function. It's worth noting that
-     * although the DTLS server may receive the ClientHello immediately after sending out the ICE
-     * response, this shouldn't be an issue as the handshake function is called before any DTLS
-     * packets are received.
-     *
-     * The SSL_do_handshake can't be called if DTLS hasn't prepare for udp.
-     */
+    /* The SSL_do_handshake can't be called if DTLS hasn't prepare for udp. */
     if (!c->tls_shared.external_sock) {
         ret = dtls_handshake(h);
         // Fatal SSL error, for example, no available suite when peer is DTLS 1.0 while we are DTLS 1.2.
@@ -837,8 +822,9 @@ static int dtls_start(URLContext *h, const char *url, int flags, AVDictionary **
 
     av_log(c, AV_LOG_VERBOSE, "Setup ok, MTU=%d\n", c->tls_shared.mtu);
 
-    ret = 0;
+    return 0;
 fail:
+    tls_close(h);
     return ret;
 }
 
@@ -848,7 +834,6 @@ static int tls_open(URLContext *h, const char *uri, int flags, AVDictionary **op
     TLSShared *s = &c->tls_shared;
     int ret;
 
-    av_assert0(s);
     if ((ret = ff_tls_open_underlying(s, h, uri, options)) < 0)
         goto fail;
 
@@ -936,12 +921,14 @@ static int tls_write(URLContext *h, const uint8_t *buf, int size)
     URLContext *uc = s->is_dtls ? s->udp : s->tcp;
     int ret;
 
-    // Set or clear the AVIO_FLAG_NONBLOCK on c->tls_shared.tcp
+    // Set or clear the AVIO_FLAG_NONBLOCK on the underlying socket
     uc->flags &= ~AVIO_FLAG_NONBLOCK;
     uc->flags |= h->flags & AVIO_FLAG_NONBLOCK;
 
-    if (s->is_dtls)
-        size = FFMIN(size, DTLS_get_data_mtu(c->ssl));
+    if (s->is_dtls) {
+        const size_t mtu_size = DTLS_get_data_mtu(c->ssl);
+        size = FFMIN(size, mtu_size);
+    }
 
     ret = SSL_write(c->ssl, buf, size);
     if (ret > 0)

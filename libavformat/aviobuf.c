@@ -125,8 +125,8 @@ AVIOContext *avio_alloc_context(
 
 void avio_context_free(AVIOContext **ps)
 {
-    if (ps && *ps) {
-        AVIOContext *s = *ps;
+    AVIOContext *s = *ps;
+    if (s) {
         av_freep(&s->protocol_whitelist);
         av_freep(&s->protocol_blacklist);
     }
@@ -311,7 +311,7 @@ int64_t avio_seek(AVIOContext *s, int64_t offset, int whence)
         ctx->seek_count++;
         if (!s->write_flag)
             s->buf_end = s->buffer;
-        s->buf_ptr = s->buf_ptr_max = s->buffer;
+        s->checksum_ptr = s->buf_ptr = s->buf_ptr_max = s->buffer;
         s->pos = offset;
     }
     s->eof_reached = 0;
@@ -1451,6 +1451,8 @@ static int null_buf_write(void *opaque, const uint8_t *buf, int buf_size)
 {
     DynBuffer *d = opaque;
 
+    if ((unsigned)d->pos + (unsigned)buf_size > INT_MAX)
+        return AVERROR(ERANGE);
     d->pos += buf_size;
     if (d->pos > d->size)
         d->size = d->pos;
@@ -1474,7 +1476,7 @@ int ffio_close_null_buf(AVIOContext *s)
 
     avio_flush(s);
 
-    size = d->size;
+    size = s->error ? s->error : d->size;
 
     avio_context_free(&s);
 
