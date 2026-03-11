@@ -72,6 +72,7 @@ typedef struct ReadEIA608Context {
     const AVClass *class;
 
     int start, end;
+    int write_a53cc;
     float spw;
     int chp;
     int lp;
@@ -92,6 +93,7 @@ static const AVOption readeia608_options[] = {
     { "scan_min", "set from which line to scan for codes",               OFFSET(start), AV_OPT_TYPE_INT,   {.i64=0},     0, INT_MAX, FLAGS },
     { "scan_max", "set to which line to scan for codes",                 OFFSET(end),   AV_OPT_TYPE_INT,   {.i64=29},    0, INT_MAX, FLAGS },
     { "spw",      "set ratio of width reserved for sync code detection", OFFSET(spw),   AV_OPT_TYPE_FLOAT, {.dbl=.27}, 0.1,     0.7, FLAGS },
+    { "writea53cc", "write extracted data to AV_FRAME_DATA_A53_CC",      OFFSET(write_a53cc), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS },
     { "chp",      "check and apply parity bit",                          OFFSET(chp),   AV_OPT_TYPE_BOOL,  {.i64= 0},    0,       1, FLAGS },
     { "lp",       "lowpass line prior to processing",                    OFFSET(lp),    AV_OPT_TYPE_BOOL,  {.i64= 1},    0,       1, FLAGS },
     { NULL }
@@ -464,12 +466,28 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     AVFilterContext *ctx  = inlink->dst;
     AVFilterLink *outlink = ctx->outputs[0];
     ReadEIA608Context *s = ctx->priv;
+    uint8_t *cc_data = NULL;
+    size_t cc_size = 0;
     int nb_found;
 
     ff_filter_execute(ctx, extract_lines, in, NULL,
                       FFMIN(FFMAX(s->end - s->start + 1, 1), ff_filter_get_nb_threads(ctx)));
 
     nb_found = 0;
+
+    // First pass: count and allocate CC data buffer if writea53cc is enabled
+    if (s->write_a53cc) {
+        for (int i = 0; i < s->end - s->start + 1; i++) {
+            if (s->scan[i].found)
+                nb_found++;
+        }
+        if (nb_found > 0) {
+            cc_size = nb_found * 3;
+            cc_data = av_malloc(cc_size);
+        }
+        nb_found = 0;
+    }
+
     for (int i = 0; i < s->end - s->start + 1; i++) {
         ScanItem *scan = &s->scan[i];
         uint8_t key[128], value[128];
@@ -481,6 +499,13 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         //snprintf(value, sizeof(value), "0b%d%d%d%d%d%d%d%d 0b%d%d%d%d%d%d%d%d", codes[3]==255,codes[4]==255,codes[5]==255,codes[6]==255,codes[7]==255,codes[8]==255,codes[9]==255,codes[10]==255,codes[11]==255,codes[12]==255,codes[13]==255,codes[14]==255,codes[15]==255,codes[16]==255,codes[17]==255,codes[18]==255);
         //av_dict_set(&in->metadata, key, value, 0);
 
+        // Populate A53 CC side data if enabled
+        if (s->write_a53cc && cc_data) {
+            cc_data[nb_found * 3 + 0] = 0x04; // cc_valid flag
+            cc_data[nb_found * 3 + 1] = scan->byte[0];
+            cc_data[nb_found * 3 + 2] = scan->byte[1];
+        }
+
         snprintf(key, sizeof(key), "lavfi.readeia608.%d.cc", nb_found);
         snprintf(value, sizeof(value), "0x%02X%02X", scan->byte[0], scan->byte[1]);
         av_dict_set(&in->metadata, key, value, 0);
@@ -489,6 +514,15 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
         av_dict_set_int(&in->metadata, key, scan->nb_line, 0);
 
         nb_found++;
+    }
+
+    // Attach A53 CC side data to frame if enabled
+    if (s->write_a53cc && cc_data && cc_size > 0) {
+        AVFrameSideData *sd = av_frame_new_side_data(in, AV_FRAME_DATA_A53_CC, cc_size);
+        if (sd) {
+            memcpy(sd->data, cc_data, cc_size);
+        }
+        av_free(cc_data);
     }
 
     return ff_filter_frame(outlink, in);
