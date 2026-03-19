@@ -1208,6 +1208,8 @@ static int scale_internal(SwsContext *sws,
 void sws_frame_end(SwsContext *sws)
 {
     SwsInternal *c = sws_internal(sws);
+    if (!c->is_legacy_init)
+        return;
     av_frame_unref(c->frame_src);
     av_frame_unref(c->frame_dst);
     c->src_ranges.nb_ranges = 0;
@@ -1217,6 +1219,8 @@ int sws_frame_start(SwsContext *sws, AVFrame *dst, const AVFrame *src)
 {
     SwsInternal *c = sws_internal(sws);
     int ret, allocated = 0;
+    if (!c->is_legacy_init)
+        return AVERROR(EINVAL);
 
     ret = av_frame_ref(c->frame_src, src);
     if (ret < 0)
@@ -1249,6 +1253,8 @@ int sws_send_slice(SwsContext *sws, unsigned int slice_start,
 {
     SwsInternal *c = sws_internal(sws);
     int ret;
+    if (!c->is_legacy_init)
+        return AVERROR(EINVAL);
 
     ret = ff_range_add(&c->src_ranges, slice_start, slice_height);
     if (ret < 0)
@@ -1272,6 +1278,8 @@ int sws_receive_slice(SwsContext *sws, unsigned int slice_start,
     SwsInternal *c = sws_internal(sws);
     unsigned int align = sws_receive_slice_alignment(sws);
     uint8_t *dst[4];
+    if (!c->is_legacy_init)
+        return AVERROR(EINVAL);
 
     /* wait until complete input has been received */
     if (!(c->src_ranges.nb_ranges == 1        &&
@@ -1327,7 +1335,7 @@ static int frame_ref(AVFrame *dst, const AVFrame *src)
     /* ref the buffers */
     for (int i = 0; i < FF_ARRAY_ELEMS(src->buf); i++) {
         if (!src->buf[i])
-            continue;
+            break;
         dst->buf[i] = av_buffer_ref(src->buf[i]);
         if (!dst->buf[i])
             return AVERROR(ENOMEM);
@@ -1345,9 +1353,9 @@ int sws_scale_frame(SwsContext *sws, AVFrame *dst, const AVFrame *src)
     if (!src || !dst)
         return AVERROR(EINVAL);
 
-    if (c->frame_src) {
+    if (c->is_legacy_init) {
         /* Context has been initialized with explicit values, fall back to
-         * legacy API */
+         * legacy API behavior. */
         ret = sws_frame_start(sws, dst, src);
         if (ret < 0)
             return ret;
@@ -1368,27 +1376,29 @@ int sws_scale_frame(SwsContext *sws, AVFrame *dst, const AVFrame *src)
     if (!src->data[0])
         return 0;
 
-    if (c->graph[FIELD_TOP]->noop &&
-        (!c->graph[FIELD_BOTTOM] || c->graph[FIELD_BOTTOM]->noop) &&
-        src->buf[0] && !dst->buf[0] && !dst->data[0])
-    {
-        /* Lightweight refcopy */
-        ret = frame_ref(dst, src);
+    const SwsGraph *top = c->graph[FIELD_TOP];
+    const SwsGraph *bot = c->graph[FIELD_BOTTOM];
+    if (dst->data[0]) /* user-provided buffers */
+        goto process_frame;
+
+    /* Sanity */
+    memset(dst->buf, 0, sizeof(dst->buf));
+    memset(dst->data, 0, sizeof(dst->data));
+    memset(dst->linesize, 0, sizeof(dst->linesize));
+    dst->extended_data = dst->data;
+
+    if (src->buf[0] && top->noop && (!bot || bot->noop))
+        return frame_ref(dst, src);
+
+    ret = av_frame_get_buffer(dst, 0);
+    if (ret < 0)
+        return ret;
+
+process_frame:
+    for (int field = 0; field < (bot ? 2 : 1); field++) {
+        ret = ff_sws_graph_run(c->graph[field], dst, src);
         if (ret < 0)
             return ret;
-    } else {
-        if (!dst->data[0]) {
-            ret = av_frame_get_buffer(dst, 0);
-            if (ret < 0)
-                return ret;
-        }
-
-        for (int field = 0; field < 2; field++) {
-            SwsGraph *graph = c->graph[field];
-            ff_sws_graph_run(graph, dst, src);
-            if (!graph->dst.interlaced)
-                break;
-        }
     }
 
     return 0;
@@ -1516,6 +1526,9 @@ int attribute_align_arg sws_scale(SwsContext *sws,
                                   const int dstStride[])
 {
     SwsInternal *c = sws_internal(sws);
+    if (!c->is_legacy_init)
+        return AVERROR(EINVAL);
+
     if (c->nb_slice_ctx) {
         sws = c->slice_ctx[0];
         c = sws_internal(sws);

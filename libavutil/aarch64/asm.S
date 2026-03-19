@@ -64,6 +64,22 @@
 #define DISABLE_I8MM
 #endif
 
+#if HAVE_AS_ARCHEXT_AES_DIRECTIVE
+#define ENABLE_PMULL  .arch_extension aes
+#define DISABLE_PMULL .arch_extension noaes
+#else
+#define ENABLE_PMULL
+#define DISABLE_PMULL
+#endif
+
+#if HAVE_AS_ARCHEXT_SHA3_DIRECTIVE
+#define ENABLE_EOR3  .arch_extension sha3
+#define DISABLE_EOR3 .arch_extension nosha3
+#else
+#define ENABLE_EOR3
+#define DISABLE_EOR3
+#endif
+
 #if HAVE_AS_ARCHEXT_SVE_DIRECTIVE
 #define ENABLE_SVE  .arch_extension sve
 #define DISABLE_SVE .arch_extension nosve
@@ -105,6 +121,8 @@
 #endif
 
 DISABLE_ARM_CRC
+DISABLE_PMULL
+DISABLE_EOR3
 DISABLE_DOTPROD
 DISABLE_I8MM
 DISABLE_SVE
@@ -237,8 +255,14 @@ DISABLE_SME2
 #   define AARCH64_VALIDATE_LINK_REGISTER
 #endif
 
+#if defined(__ARM_FEATURE_GCS_DEFAULT) && __ARM_FEATURE_GCS_DEFAULT == 1
+#define GNU_PROPERTY_AARCH64_GCS (1 << 2)
+#else
+#define GNU_PROPERTY_AARCH64_GCS 0 /* No GCS */
+#endif
 
-#if (GNU_PROPERTY_AARCH64_BTI != 0 || GNU_PROPERTY_AARCH64_PAC != 0) && defined(__ELF__)
+
+#if (GNU_PROPERTY_AARCH64_BTI != 0 || GNU_PROPERTY_AARCH64_PAC != 0 || GNU_PROPERTY_AARCH64_GCS != 0) && defined(__ELF__)
         .pushsection .note.gnu.property, "a"
         .balign 8
         .long 4
@@ -247,7 +271,7 @@ DISABLE_SME2
         .asciz "GNU"
         .long 0xc0000000 /* GNU_PROPERTY_AARCH64_FEATURE_1_AND */
         .long 4
-        .long (GNU_PROPERTY_AARCH64_BTI | GNU_PROPERTY_AARCH64_PAC)
+        .long (GNU_PROPERTY_AARCH64_BTI | GNU_PROPERTY_AARCH64_PAC | GNU_PROPERTY_AARCH64_GCS)
         .long 0
         .popsection
 #endif
